@@ -1,3 +1,6 @@
+import datetime
+import functools
+import glob
 import logging
 import os
 import re
@@ -7,25 +10,33 @@ import tempfile
 import typing as t
 from pathlib import Path
 
-from git import Git
+from git import Git, Repo
 
-from .documents import DocumentDescriptor
-from .documents import DocumentFile
+from .documents import DocumentDescriptor, DocumentFile
+from .mixins import ParserUtilityMixin
 
 logger = logging.getLogger(__name__)
 
 
-class DocsSourceRepository:
-    def __init__(self, repo_url: str, repo_name: str, repo_relative_path: str) -> None:
+class DocsSourceRepository(ParserUtilityMixin):
+    def __init__(
+        self,
+        repo_url: str,
+        repo_name: str,
+        repo_relative_path: str,
+        repo_branch: str = "main",
+    ) -> None:
         self.repo_url = repo_url
         self.repo_name = repo_name
         self.repo_relative_path = repo_relative_path
+        self.repo_branch = repo_branch
         logger.info("Create tempdir")
         self.repo_temp_directory = tempfile.TemporaryDirectory()
         self._register_delete_tempdir()
         self.git = Git()
         self.repo_workdir_abs_path: Path = t.cast(Path, None)
         self.documents: t.Dict[Path, t.Dict[DocumentFile, t.List[DocumentFile]]]
+        self.repo: t.Optional[Repo] = None
 
     def cleanup(self) -> None:
         logger.info(f"Cleaning up tempdir '{self.repo_temp_directory.name}'")
@@ -43,6 +54,10 @@ class DocsSourceRepository:
         signal.signal(signal.SIGTERM, self._cleanup_repo_temp_directory)
         signal.signal(signal.SIGINT, self._cleanup_repo_temp_directory)
 
+    def setup_repository(self, repo_path: Path) -> None:
+        self.repo = Repo(repo_path)
+        logging.info("Created 'Repo' object for Repository")
+
     def clone_repository(self, destination_basepath: t.Optional[Path] = None) -> Path:
         repo_path = os.path.join(
             destination_basepath or self.repo_temp_directory.name, self.repo_name
@@ -52,29 +67,45 @@ class DocsSourceRepository:
                 f"'destination_basepath' was set, cloning to '{repo_path}' instead of tempdir"
             )
         logger.info(
-            f"Cloning repository '{self.repo_name}' with depth of 1 on branch 'main'"
+            f"Cloning repository '{self.repo_name}' on branch '{self.repo_branch}'"
         )
-        self.git.clone("--depth", "1", "--branch", "main", self.repo_url, repo_path)
+        self.git.clone("--branch", self.repo_branch, self.repo_url, repo_path)
         self.repo_workdir_abs_path = Path(
             os.path.join(repo_path, self.repo_relative_path)
         )
         logging.info("Done cloning repository")
+        self.setup_repository(Path(repo_path))
         return self.repo_workdir_abs_path
 
     def get_documents(
         self,
+    ) -> t.List["DocumentFile"]:
+        """Discover all SKU series documents while splitting all multi-series documents into distinct series"""
+        series_names = [
+            fd.to_document_files()
+            for f in glob.iglob(
+                f"{self.repo_workdir_abs_path.parent}/**/*", recursive=True
+            )
+            if (fd := DocumentDescriptor(Path(f))).is_series or fd.is_multi_series
+        ]
+        series_documents_list = self.flatten_list_of_lists(series_names)
+        series_documents_list = list(set(series_documents_list))
+        series_documents_list = t.cast(t.List["DocumentFile"], series_documents_list)
+        return series_documents_list
+
+    def get_families_and_associated_documents(
+        self,
     ) -> t.Dict[Path, t.Dict["DocumentFile", t.List["DocumentFile"]]]:
-        directories = self._list_sku_series_directories()
-        self.documents = {
-            dir: self._list_sku_series_documents_for_directory(dir)
-            for dir in directories
-        }
-        return self.documents
+        pass
 
     def get_families(
         self,
     ) -> t.Tuple[t.Dict[Path, t.List["DocumentFile"]], t.List["DocumentFile"]]:
-        directories = self._list_sku_series_directories()
+        """
+        Discover all family documents inside of the working directory of the repository.
+        Return these as a mapping of Folders to Families and a flat list of families, both as documents.
+        """
+        directories = self._list_sku_directories()
         results: t.Dict[Path, t.List["DocumentFile"]] = {}
         results_list: t.List["DocumentFile"] = []
         for directory in directories:
@@ -85,10 +116,11 @@ class DocsSourceRepository:
         return results, results_list
 
     def get_families_for_directory(self, directory: Path) -> t.List["DocumentFile"]:
+        """Return all family documents inside of a specific folder"""
         _files = [
             entry
             for entry in directory.iterdir()
-            if entry.is_file() and entry.name.endswith(".md")
+            if entry.is_file() and entry.suffix == ".md"
         ]
         files = [DocumentDescriptor(entry) for entry in _files]
         families = [
@@ -98,7 +130,8 @@ class DocsSourceRepository:
         ]
         return families
 
-    def _list_sku_series_directories(self) -> t.List[Path]:
+    def _list_sku_directories(self) -> t.List[Path]:
+        """Return a list of all valid SKU folder paths"""
         all_subdirectories = [
             entry
             for entry in Path(self.repo_workdir_abs_path).iterdir()
@@ -109,10 +142,6 @@ class DocsSourceRepository:
             for entry in all_subdirectories
             if re.match(r"^(?!migration)([a-z]*?-[a-z-]+)$", entry.name)
         ]
-
-    @staticmethod
-    def flatten_list_of_lists(lst: t.List[t.List[t.Any]]) -> t.List[t.Any]:
-        return [item for sublist in lst for item in sublist]
 
     def _list_sku_series_documents_for_directory(
         self, directory: Path
@@ -143,3 +172,15 @@ class DocsSourceRepository:
             family = s.get_associated_family(families)
             results[family].append(s)
         return results
+
+    @functools.lru_cache(maxsize=150)
+    def last_commit_for_document(
+        self, document_file: DocumentFile
+    ) -> datetime.datetime:
+        assert self.repo
+        for commit in self.repo.iter_commits(self.repo_branch):
+            commit_files = [Path(c) for c in commit.stats.files.keys()]
+            if document_file.path.relative_to(self.repo.working_dir) in commit_files:
+                commit_time = datetime.datetime.fromtimestamp(commit.committed_date)
+                return commit_time
+        raise ValueError("No commit found for file, aborting")

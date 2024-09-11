@@ -1,16 +1,10 @@
-import logging
 import typing as t
-import unittest
-from pathlib import Path
 
-from src import constants
-from src.repository import DocsSourceRepository
-
-logger = logging.getLogger(__name__)
+from .shared import BaseTestCase, tag
 
 
-class TestDocsSourceRepository(unittest.TestCase):
-    repository: DocsSourceRepository
+@tag("repository")
+class TestDocsSourceRepository(BaseTestCase):
     directories: t.List[str]
 
     @classmethod
@@ -24,32 +18,14 @@ class TestDocsSourceRepository(unittest.TestCase):
             "general-purpose",
             "fpga-accelerated",
         ]
-        cls.repository = DocsSourceRepository(
-            constants.MS_REPOSITORY_URL,
-            constants.MS_REPOSITORY_NAME,
-            constants.MS_REPOSITORY_PATH,
-        )
+        super().setUpClass()
 
-    def setUp(self) -> None:
-        current_path = Path(__file__).parent
-        clone_basepath = current_path / "data"
-        if not (clone_basepath / self.repository.repo_name).exists():
-            self.repository_workdir = self.repository.clone_repository(clone_basepath)
-        else:
-            logger.debug("Repo already exists, not cloning again")
-            self.repository_workdir = (
-                clone_basepath
-                / self.repository.repo_name
-                / self.repository.repo_relative_path
-            )
-            self.repository.repo_workdir_abs_path = self.repository_workdir
-
-    def test010_list_sku_series_directories(self):
+    def test010_list_sku_directories(self):
         self.assertTrue(
             all(
                 [
                     d.name in self.directories
-                    for d in self.repository._list_sku_series_directories()
+                    for d in self.repository._list_sku_directories()
                 ]
             )
         )
@@ -59,6 +35,7 @@ class TestDocsSourceRepository(unittest.TestCase):
             self.repository_workdir
             / self.directories[self.directories.index("memory-optimized")]
         )
+        self.assertTrue(families)
 
     def test030_get_families_for_directory(self):
         families = self.repository.get_families_for_directory(
@@ -72,6 +49,14 @@ class TestDocsSourceRepository(unittest.TestCase):
         self.assertTrue(families)
         self.assertTrue(len(family_list) > 1)
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.repository.cleanup()
+    def test050_get_file_changed_timestamp(self):
+        documents = self.repository.get_documents()
+        for document in documents[:10]:
+            timestamp = self.repository.last_commit_for_document(document)
+            print(timestamp)
+            self.assertTrue(timestamp)
+        # Ensure the lru_cache is working
+        for document in documents[:10]:
+            timestamp = self.repository.last_commit_for_document(document)
+            print(timestamp)
+            self.assertTrue(timestamp)

@@ -49,3 +49,4 @@ wheels/
 # Ignore all test-data but still push the directory itself
 tests/data/*
 !tests/data/.gitkeep
+!tests/data/documents

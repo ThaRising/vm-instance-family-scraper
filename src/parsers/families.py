@@ -1,23 +1,29 @@
+import hashlib
 import typing as t
+from functools import lru_cache
 
 import panflute
 
-from .abstract import MarkdownDocumentProps
-from .documents import DocumentDescriptor, DocumentFile
-from .parser import MarkdownDocumentParser, MarkdownDocumentParserDoctype
+from src.documents import DocumentDescriptor, DocumentFile
+
+from .shared import BaseParser
 
 
-class SkuFamilyDocument(MarkdownDocumentParser, MarkdownDocumentProps):
-    document: MarkdownDocumentParserDoctype
-
-    def __init__(self, document: DocumentFile) -> None:
-        super().__init__(document)
+class FamilyMarkdownDocumentParser(BaseParser):
+    def __init__(
+        self, document_file: DocumentFile, family_document_file: DocumentFile
+    ) -> None:
+        assert document_file.is_family
+        assert document_file is family_document_file
+        super().__init__(document_file, family_document_file)
         self.sections = list(self.get_sections())
-        self.children: t.List[DocumentFile] = self.get_children()
 
     @property
     def name(self) -> str:
         return self.document_file.identifier.upper()
+
+    def do_document_hashing(self) -> "hashlib._Hash":
+        return self.generate_document_hash(self.path)
 
     def get_sections(self) -> t.Generator[panflute.Header, None, None]:
         start_header = [
@@ -34,12 +40,13 @@ class SkuFamilyDocument(MarkdownDocumentParser, MarkdownDocumentProps):
             ):
                 yield header
 
+    @lru_cache(maxsize=1)
     def get_children(self) -> t.List[DocumentFile]:
         children = []
         for section in self.sections:
-            link = section.next.next.content.list[0]
+            link = section.next.next.content.list[0]  # type: ignore
             assert isinstance(link, panflute.Link)
-            path = self.document_path.parent / link.url
+            path = self._path.parent / link.url
             children.append(DocumentDescriptor(path).to_document_files())
-        children = self.flatten_list_of_lists(children)
-        return children
+        _children = self.flatten_list_of_lists(children)
+        return _children

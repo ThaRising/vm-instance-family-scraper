@@ -1,18 +1,19 @@
-import hashlib
 import logging
 import os
 import re
 import typing as t
 from pathlib import Path
 
+from .mixins import FileHashingMixin
+
 logger = logging.getLogger(__name__)
 
 
 class DocumentDescriptor:
     EXCEPTION_FILES = ["dv2-dsv2-series-memory.md"]
-    series_regex = re.compile(r"^([a-z\d]+)-series(?:\.md)?$")
+    series_regex = re.compile(r"^([a-z\d]+)-?(v\d)?-series(?:\.md)?$")
     multi_series_regex = re.compile(
-        r"^([a-z\d]+)-([a-z\d]+)(?:-[a-z]*?)?-series(?:\.md)?$"
+        r"^([a-z\d]+)-(?!v\d)([a-z\d]+)(?:-[a-z]*?)?-series(?:\.md)?$"
     )
     family_regex = re.compile(r"^([a-z]+)-family\.[a-z]{1,3}$")
 
@@ -20,11 +21,10 @@ class DocumentDescriptor:
         self.path = path
         name = self.path.name
         self.is_series = bool(self.series_regex.match(name))
-        self.series_name = (
-            t.cast(re.Match, self.series_regex.search(name)).group(1)
-            if self.is_series
-            else None
-        )
+        series_name_match = t.cast(re.Match, self.series_regex.search(name))
+        self.series_name = series_name_match.group(1) if self.is_series else None
+        if self.is_series and (name_suffix := series_name_match.group(2)):
+            self.series_name = self.series_name + name_suffix
         self.is_family = bool(self.family_regex.match(name))
         self.family_name = None
         if self.is_family:
@@ -87,9 +87,7 @@ class DocumentDescriptor:
         return [self.to_document_file([id_]) for id_ in identifier]
 
 
-class DocumentFile:
-    BUF_SIZE = 65536
-
+class DocumentFile(FileHashingMixin):
     def __init__(
         self,
         path: Path,
@@ -103,21 +101,7 @@ class DocumentFile:
         self.is_family = is_family
         self.is_multi_series_document = is_multi_series_document
         self.identifier = identifier
-        self.sha256_hash = self.generate_document_hash()
-
-    def generate_document_hash(self):
-        sha256 = hashlib.sha256()
-        with open(self.path, "rb") as fin:
-            while True:
-                data = fin.read(self.BUF_SIZE)
-                if not data:
-                    break
-                sha256.update(data)
-        return sha256
-
-    @property
-    def hash(self) -> str:
-        return self.sha256_hash.hexdigest()
+        self._document_hash = self.generate_document_hash(self.path)
 
     @property
     def name(self) -> str:
@@ -147,6 +131,7 @@ class DocumentFile:
     def get_associated_family(
         self, family_paths: t.Sequence[t.Union["DocumentFile", Path]]
     ) -> t.Union["DocumentFile", Path]:
+        """Get the document of the family associated with this SKU series document"""
         cls = self.__class__
         assert len(family_paths)
         if not (input_was_native := isinstance(family_paths[0], cls)):

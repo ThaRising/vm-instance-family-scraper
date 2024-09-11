@@ -9,7 +9,7 @@ from colorama import Fore
 
 
 class ColorFormatter(logging.Formatter):
-    _format = "%(levelname)s * %(filename)s:%(lineno)d.%(funcName)s -- %(message)s"
+    _format = "%(levelname)s %(asctime)s * %(filename)s:%(lineno)d.%(funcName)s -- %(message)s"
 
     FORMATS = {
         logging.DEBUG: Fore.LIGHTBLACK_EX + _format + Fore.RESET,

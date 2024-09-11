@@ -49,10 +49,6 @@ class SkuSeriesDocument(MarkdownDocumentParser, MarkdownDocumentProps):
             text = match.group(1)
         else:
             text = document_title_content[index]
-            # if text.lower() != self.document_file.identifier:
-            #     val = text.split("/")
-            #     v = [v.lower() for v in val].index(self.document_file.identifier)
-            #     text = val[v]
         return text
 
     def get_host_specs_document(self) -> "SkuSeriesDocument":

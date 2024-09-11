@@ -3,20 +3,21 @@ import re
 import typing as t
 from collections import OrderedDict
 
-from . import constants
-from .series import SkuSeriesDocument
+from src import constants
+from src.parsers.series import SeriesMarkdownDocumentParser
 
 logger = logging.getLogger(__name__)
 
 
 class SkuTypes:
-    def __init__(self, series_document: SkuSeriesDocument) -> None:
-        self.regex = re.compile(
-            r"^(?P<tier>[sS]tandard|[bB]asic)?_?(?P<fam>[A-Z])(?P<subfam>[A-Z]{0,2})(?P<vcpus>\d+)(?P<constr>-\d+)?(?P<addons>[a-z]*)_?(?P<accel>[a-zA-Z\d]+_)?(?P<version>v\d)?(?P<iversion>\d)?$"
-        )
-        self.series_document = series_document
-        self.is_confidential = self.series_document.is_confidential()
-        self.instances = self.series_document.get_associated_instance_names()
+    regex = re.compile(
+        r"^(?P<tier>[sS]tandard|[bB]asic)?_?(?P<fam>[A-Z])(?P<subfam>[A-Z]{0,2})(?P<vcpus>\d+)(?P<constr>-\d+)?(?P<addons>[a-z]*)_?(?P<accel>[a-zA-Z\d]+_)?(?P<version>v\d)?(?P<iversion>\d)?$"
+    )
+
+    def __init__(self, series_parser: SeriesMarkdownDocumentParser) -> None:
+        self.parser = series_parser
+        self.is_confidential = self.parser.is_confidential
+        self.instances = self.parser.get_associated_instance_names()
         self.instance_attributes: t.Dict[str, dict] = {}
         self._instance_attributes = []
         for instance in self.instances:
@@ -28,6 +29,9 @@ class SkuTypes:
         if val is None or isinstance(val, int):
             return val
         return int(val)
+
+    def to_dto(self) -> t.Dict[str, dict]:
+        return self.instance_attributes
 
     def _get_instance_attributes(self) -> None:
         for instance_info in self._instance_attributes:
