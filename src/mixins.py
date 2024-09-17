@@ -56,7 +56,7 @@ class ParserUtilityMixin:
 
     @classmethod
     def split_strings(cls, elem: str) -> t.List[str]:
-        elements = re.split(r"<[a-z]+>|\\n", elem)
+        elements = re.split(r"<[a-z]+>|\\n|/", elem)
         elements = [e for e in elements if e]
         elements = [cls.clean_string(e) for e in elements]
         return elements

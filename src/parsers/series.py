@@ -1,5 +1,8 @@
 import hashlib
 import typing as t
+from functools import cached_property
+import glob
+from pathlib import Path
 
 import panflute
 
@@ -9,6 +12,7 @@ from src.azure_types.capabilities import (
 )
 from src.documents import DocumentDescriptor, DocumentFile
 from src.parsers.families import FamilyMarkdownDocumentParser
+from src import constants
 
 from .shared import BaseParser
 
@@ -27,12 +31,24 @@ class SeriesMarkdownDocumentParser(BaseParser):
             self.family_document_file, self.family_document_file
         )
 
+    @cached_property
+    def to_type(self):
+        from src.azure_types.series import AzureSkuSeriesType
+
+        if self.is_public_preview:
+            return None
+        return AzureSkuSeriesType(self, self.family_document_parser)
+
     def do_document_hashing(self) -> "hashlib._Hash":
         return self.generate_hash(self.stringify(self.document))
 
     @property
     def is_confidential(self) -> bool:
         return "confidential" in self.host_summary.lower()
+
+    @property
+    def is_public_preview(self) -> bool:
+        return "public preview" in self.stringify(self.document.headers[0]).lower()
 
     @property
     def is_previous_generation(self) -> bool:
@@ -45,8 +61,26 @@ class SeriesMarkdownDocumentParser(BaseParser):
     ) -> t.OrderedDict[str, t.OrderedDict[str, str]]:
         return self.parse_table_colhead_rowhead(table)
 
-    @property
-    def host_specs_table(self) -> t.OrderedDict[str, t.OrderedDict[str, str]]:
+    def is_alternative_host_specs_table(self, table) -> str:
+        if not any([k in table.keys() for k in ("Processor", "Memory", "Local Storage", "Remote Storage", "Network")]):
+            return True
+        return False
+
+    def _host_specs_table_file(self, host_specs_table) -> t.Optional[Path]:
+        if self.is_alternative_host_specs_table(host_specs_table):
+            reverse_folder_index = list(reversed(self._path.parts)).index(constants.MS_REPOSITORY_PATH.split("/")[-2])
+            folder_path_parts = self._path.parts[:-reverse_folder_index]
+            folder_path = Path(*folder_path_parts)
+            assert folder_path.exists()
+            files = [Path(file) for file in glob.iglob(f"{folder_path}/**/*", recursive=True)]
+            host_specs_filename = f"{self._path.stem}-specs.md"
+            file_index = [filepath.name for filepath in files].index(host_specs_filename)
+            file = files[file_index]
+            assert file.exists()
+            return file
+        return None
+
+    def _host_specs_table(self) -> t.OrderedDict[str, t.OrderedDict[str, str]]:
         self.logger.debug(
             f"host_specs_table called for document '{self.path.name}' ({self.name})"
         )
@@ -71,6 +105,22 @@ class SeriesMarkdownDocumentParser(BaseParser):
             return self._get_host_specs_table(host_specs_table)
         self.logger.debug("host_specs_table -> Default Case")
         return self._get_host_specs_table(self.document.tables[0])
+
+    # TODO: cached_property
+    @property
+    def host_specs_table(self) -> t.OrderedDict[str, t.OrderedDict[str, str]]:
+        table = self._host_specs_table()
+        assert table
+        alternate_table_file = self._host_specs_table_file(table)
+        if alternate_table_file:
+            alternate_specs_document = DocumentDescriptor(alternate_table_file)
+            cls = self.base_parser_factory(SafeDocumentHash)
+            parser = cls(
+                alternate_specs_document.to_document_file(), self.family_document_file
+            )
+            host_specs_table = parser.document.tables[0]
+            return self._get_host_specs_table(host_specs_table)
+        return table
 
     def _get_host_summary(self, parser) -> str:
         paragraphs = []
@@ -121,10 +171,14 @@ class SeriesMarkdownDocumentParser(BaseParser):
                 if self._paragraph_is_capabilities(content):
                     break
                 next_elem = next_elem.next
-            assert next_elem
-            content = self.stringify(next_elem).lower()
-            assert self._paragraph_is_capabilities(content)
-            return self._parse_capabilities(next_elem)
+            if next_elem:
+                content = self.stringify(next_elem).lower()
+                assert self._paragraph_is_capabilities(content)
+                return self._parse_capabilities(next_elem)
+            else:
+                capabilities_dto = CapabilitiesElement.from_special_case_elements(self.document, self)
+                cap = AzureSkuCapabilities(capabilities_dto)
+                return cap.to_dto()
 
     def _get_linked_doc_parser_from_family_page(
         self, all_links: t.List[panflute.Link], link_identifier: str

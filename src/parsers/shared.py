@@ -1,4 +1,5 @@
 import copy
+import datetime
 import hashlib
 import logging
 import re
@@ -7,6 +8,7 @@ import sys
 import tempfile
 import typing as t
 from collections import OrderedDict
+from functools import lru_cache
 from io import StringIO
 from pathlib import Path
 
@@ -15,6 +17,7 @@ import pypandoc
 
 from src.documents import DocumentFile
 from src.mixins import FileHashingMixin, ParserUtilityMixin
+from src.repository import DocsSourceRepository
 
 
 class DocumentType(panflute.Doc):
@@ -150,9 +153,20 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
                 index = document_title_string_list.index(self.document_file.path.stem)
             except ValueError:
                 # Special Case for VM series with accelerators in their names
-                document_title_string_list = [s.replace("_", "") for s in document_title_string_list]
-                index = document_title_string_list.index(self.document_file.path.stem.split("-")[0])
-            match = re.search(r"^([a-zA-Z0-9_]+)-?(?:.+)?$", document_title_content[index])
+                document_title_string_list = [
+                    s.replace("_", "") for s in document_title_string_list
+                ]
+                # Yet another special case for VM series names with multipe '-' in their names
+                doc_name = self.document_file.path.stem.split("-")[0]
+                if doc_name not in document_title_string_list:
+                    document_title_content = [title for s in document_title.content.list if (title := self.stringify(s))]
+                    document_title_string_list = [re.sub(r"[_-]", "", s).lower() for s in document_title_content]
+                index = document_title_string_list.index(
+                    doc_name
+                )
+            match = re.search(
+                r"^([a-zA-Z0-9_]+)-?(?:.+)?$", document_title_content[index]
+            )
             assert (
                 match
             ), f"A match for the files '{self.document_file.path.stem}' path name could not be found"
@@ -160,6 +174,10 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
         else:
             text = document_title_content[index]
         return text
+
+    @lru_cache(maxsize=1)
+    def last_updated_timestamp(self, repo: DocsSourceRepository) -> datetime.datetime:
+        return repo.last_commit_for_document(self._path)
 
     def commit_to_tempfile(self) -> bool:
         self.logger.debug(
@@ -259,6 +277,10 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
         for list_of_values in _body_values:
             vals = []
             for value in list_of_values:
+                # Remove superscript and other special characters
+                precleaned_value = re.sub(r"</?sup>|®|©|™", " ", value)
+                # Ensure strings do not have multiple whitespaces
+                value = re.sub(r"\s{2,}", " ", precleaned_value)
                 out = cls.split_strings(value)
                 vals.append(cls.filter_non_strings(out))
             body_values.append(vals)
@@ -294,7 +316,10 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
         header_values = header_values[1:]
         for row in body_values:
             entries[row[0][0]] = OrderedDict(
-                {head_key: row_value for head_key, row_value in zip(header_values, row[1:])}
+                {
+                    head_key: row_value
+                    for head_key, row_value in zip(header_values, row[1:])
+                }
             )
         return entries
 

@@ -1,6 +1,8 @@
 import hashlib
 import typing as t
 from functools import lru_cache
+from pathlib import Path
+import re
 
 import panflute
 
@@ -47,6 +49,14 @@ class FamilyMarkdownDocumentParser(BaseParser):
             link = section.next.next.content.list[0]  # type: ignore
             assert isinstance(link, panflute.Link)
             path = self._path.parent / link.url
+            if not path.resolve().exists():
+                path = Path(*[p for p in path.parts if p != ".."])
+            if not path.resolve().exists():
+                _file_identifier = re.search(r"^(?P<main>[a-zA-Z-\d]+)\s?(?P<version>v\d)-series$", self.stringify(section))
+                file_identifier = f"{_file_identifier.group('main')}{_file_identifier.group('version') or ''}"
+                file_identifier = re.sub(r"\s|-|_", "", file_identifier).lower()
+                path = path.parent / f"{file_identifier}-series.md"
+            assert path.resolve().exists()
             children.append(DocumentDescriptor(path).to_document_files())
         _children = self.flatten_list_of_lists(children)
         return _children

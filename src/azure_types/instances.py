@@ -66,6 +66,7 @@ class SkuTypes:
                 accelerator = re.sub(r"\s|-|_", "", accelerator)
             version = instance_attrs["version"] or "v1"
             version = version.replace("v", "")
+            iversion = instance_attrs["iversion"]
             _obj = {
                 "tier": {
                     "name": tier.capitalize(),
@@ -80,6 +81,7 @@ class SkuTypes:
                 "addons": addons,
                 "accelerator": accelerator,
                 "version": self._cast_to_int(version),
+                "iversion": self._cast_to_int(iversion),
             }
             obj = {}
             for key, value in _obj.items():

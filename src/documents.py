@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentDescriptor:
-    EXCEPTION_FILES = ["dv2-dsv2-series-memory.md"]
+    EXCEPTION_FILES = ["dv2-dsv2-series-memory.md", "nccadsh100v5-series.md"]
     series_regex = re.compile(r"^([a-z\d]+)-?(v\d)?-series(?:\.md)?$")
     multi_series_regex = re.compile(
         r"^([a-z\d]+)-(?!v\d)([a-z\d]+)(?:-[a-z]*?)?-series(?:\.md)?$"

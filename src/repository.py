@@ -69,6 +69,7 @@ class DocsSourceRepository(ParserUtilityMixin):
         logger.info(
             f"Cloning repository '{self.repo_name}' on branch '{self.repo_branch}'"
         )
+        logger.warning("Beginning cloning, this might take a while...")
         self.git.clone("--branch", self.repo_branch, self.repo_url, repo_path)
         self.repo_workdir_abs_path = Path(
             os.path.join(repo_path, self.repo_relative_path)
@@ -90,8 +91,15 @@ class DocsSourceRepository(ParserUtilityMixin):
         ]
         series_documents_list = self.flatten_list_of_lists(series_names)
         series_documents_list = list(set(series_documents_list))
+        series_documents_list = list(sorted(series_documents_list, key=lambda doc: f"{doc.path.parts[-2]}/{doc.path.parts[-1]}"))
         series_documents_list = t.cast(t.List["DocumentFile"], series_documents_list)
         return series_documents_list
+
+    def get_all_files(self) -> t.List[Path]:
+        files = glob.iglob(
+            f"{self.repo_workdir_abs_path.parent}/**/*", recursive=True
+        )
+        return list(set(files))
 
     def get_families_and_associated_documents(
         self,

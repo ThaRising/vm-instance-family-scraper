@@ -1,3 +1,4 @@
+import datetime
 import math
 import re
 import typing as t
@@ -10,7 +11,7 @@ from src.parsers.series import SeriesMarkdownDocumentParser
 
 class AzureSkuSeriesType:
     regex = re.compile(
-        r"^(?P<fam>[A-Z])(?P<subfam>[A-Z]{0,2})(?P<addons>[a-u,w-z]*)_?(?P<accel>[a-zA-Z\d]+_)?(?P<version>v\d)?(?P<iversion>\d)?$"
+        r"^(?P<fam>[A-Z])(?P<subfam>[A-Z]{0,2})(?P<addons>[a-u,w-z]*)_?(?P<accel>[a-zA-Z\d]+_?)?(?P<version>v\d)?(?P<iversion>\d)?$"
     )
     min_max_unit_regex = re.compile(
         r"^(?P<min>[\d.]+)+\s?-?\s?(?P<max>[\d.]+)?+\s?(?P<type>[\w\s]*?)$"
@@ -66,6 +67,7 @@ class AzureSkuSeriesType:
         "cap_ephemeral_disk_capable",
         "cap_nested_virtualization_capable",
         "cap_write_accelerator_capable",
+        "last_updated_azure",
     )
 
     def __init__(
@@ -134,10 +136,17 @@ class AzureSkuSeriesType:
         self.cap_nested_virtualization_capable = False
         self.cap_write_accelerator_capable = False
         self.cap_confidential_compute_capable = False
+        self.cap_trusted_launch_capable = False
         self._get_capabilities()
+        self.last_updated_azure: t.Optional[str] = None
 
     def to_dto(self) -> t.Dict[str, t.Union[int, str, bool, None]]:
         return {k: getattr(self, k) for k in self.__attrs}
+
+    def set_last_updated_azure(self, repo) -> None:
+        self.last_updated_azure = repo.last_commit_for_document(
+            self.parser.document_file
+        ).isoformat()
 
     @classmethod
     def _cast_to_int(cls, val: t.Union[int, str, None]) -> t.Optional[int]:
