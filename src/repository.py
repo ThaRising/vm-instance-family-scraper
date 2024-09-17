@@ -1,5 +1,4 @@
 import datetime
-import functools
 import glob
 import logging
 import os
@@ -37,6 +36,7 @@ class DocsSourceRepository(ParserUtilityMixin):
         self.repo_workdir_abs_path: Path = t.cast(Path, None)
         self.documents: t.Dict[Path, t.Dict[DocumentFile, t.List[DocumentFile]]]
         self.repo: t.Optional[Repo] = None
+        self.commit_index: t.Optional[t.OrderedDict[Path, datetime.datetime]] = None
 
     def cleanup(self) -> None:
         logger.info(f"Cleaning up tempdir '{self.repo_temp_directory.name}'")
@@ -91,20 +91,24 @@ class DocsSourceRepository(ParserUtilityMixin):
         ]
         series_documents_list = self.flatten_list_of_lists(series_names)
         series_documents_list = list(set(series_documents_list))
-        series_documents_list = list(sorted(series_documents_list, key=lambda doc: f"{doc.path.parts[-2]}/{doc.path.parts[-1]}"))
+        series_documents_list = list(
+            sorted(
+                series_documents_list,
+                key=lambda doc: f"{doc.path.parts[-2]}/{doc.path.parts[-1]}",
+            )
+        )
         series_documents_list = t.cast(t.List["DocumentFile"], series_documents_list)
         return series_documents_list
 
     def get_all_files(self) -> t.List[Path]:
-        files = glob.iglob(
-            f"{self.repo_workdir_abs_path.parent}/**/*", recursive=True
-        )
+        files = [
+            p
+            for f in glob.iglob(
+                f"{self.repo_workdir_abs_path.parent}/**/*", recursive=True
+            )
+            if (p := Path(f)).is_file() and "media" not in f
+        ]
         return list(set(files))
-
-    def get_families_and_associated_documents(
-        self,
-    ) -> t.Dict[Path, t.Dict["DocumentFile", t.List["DocumentFile"]]]:
-        pass
 
     def get_families(
         self,
@@ -181,14 +185,43 @@ class DocsSourceRepository(ParserUtilityMixin):
             results[family].append(s)
         return results
 
-    @functools.lru_cache(maxsize=150)
+    # @functools.lru_cache(maxsize=150)
     def last_commit_for_document(
         self, document_file: DocumentFile
     ) -> datetime.datetime:
         assert self.repo
+        if self.commit_index:
+            return self.commit_index[document_file.path]
         for commit in self.repo.iter_commits(self.repo_branch):
             commit_files = [Path(c) for c in commit.stats.files.keys()]
             if document_file.path.relative_to(self.repo.working_dir) in commit_files:
                 commit_time = datetime.datetime.fromtimestamp(commit.committed_date)
                 return commit_time
         raise ValueError("No commit found for file, aborting")
+
+    def generate_last_commit_index(
+        self, _documents: t.Optional[t.Sequence[DocumentFile]] = None
+    ) -> None:
+        if _documents:
+            documents = [d.path for d in _documents]
+        else:
+            documents = self.get_all_files()
+        assert self.repo
+        documents = [path.relative_to(self.repo.working_dir) for path in documents]
+        documents = set(documents)
+        documents = t.cast(t.Set[Path], documents)
+        commit_index = t.OrderedDict()
+        for commit in self.repo.iter_commits(self.repo_branch):
+            if not documents:
+                break
+            commit_files = set([Path(c) for c in commit.stats.files.keys()])
+            commit_time = datetime.datetime.fromtimestamp(commit.committed_date)
+            found_files = commit_files.intersection(documents)
+            logger.debug(f"Found {len(found_files)} files")
+            logger.debug(f"Remaining files: {len(documents)}")
+            for filepath in found_files:
+                documents.remove(filepath)
+                path = Path(self.repo.working_dir) / filepath
+                commit_index[path] = commit_time
+        self.commit_index = commit_index
+

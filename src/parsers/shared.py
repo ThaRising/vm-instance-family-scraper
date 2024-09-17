@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import datetime
 import hashlib
@@ -7,6 +8,7 @@ import signal
 import sys
 import tempfile
 import typing as t
+import weakref
 from collections import OrderedDict
 from functools import lru_cache
 from io import StringIO
@@ -31,7 +33,7 @@ T = t.TypeVar("T", bound="BaseParser")
 
 
 class BaseParser(FileHashingMixin, ParserUtilityMixin):
-    __interned: t.ClassVar[t.List["BaseParser"]] = []
+    __interned: t.ClassVar[weakref.WeakSet["BaseParser"]] = weakref.WeakSet()
     _signals_registered: t.ClassVar[bool] = False
     logger: logging.Logger = logging.getLogger(
         __name__
@@ -73,7 +75,7 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
         self.file = tempfile.NamedTemporaryFile(delete=False, suffix=".md")
         self.path = Path(self.file.name)
         # Add the file to class-wide list of instances to be cleaned up after the program ends
-        self.__class__.__interned.append(self)
+        self.__class__.__interned.add(self)
         # Clean the document (saving it as a variable, not writing to disk just yet)
         self.content: t.Sequence[str] = self.clean_document()
         # Generate the current hash of the unmodified base-file
@@ -86,6 +88,7 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
         self.document = self.prepare_document(document)
         self.logger.debug("Document parser initialization complete")
         self._document_hash = self.do_document_hashing()
+        weakref.finalize(self, self.finalize)
 
     def do_document_hashing(self) -> "hashlib._Hash":
         """Generate a representative hash value for the parsed document"""
@@ -97,10 +100,15 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
     def __enter__(self: T) -> T:
         return self
 
-    def __exit__(self, *args, **kwargs) -> None:
-        self.cleanup()
+    def finalize(self, *args, **kwargs) -> None:
         cls = self.__class__
-        cls.__interned.pop(cls.__interned.index(self))
+        cls.logger.info("finalize called")
+        self.cleanup()
+        with contextlib.suppress(KeyError):
+            cls.__interned.remove(self)
+
+    def __exit__(self, *args, **kwargs) -> None:
+        self.finalize()
 
     def cleanup(self) -> None:
         self.path.unlink(missing_ok=True)
@@ -129,6 +137,7 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
         signal.signal(signal.SIGINT, cls._cleanup_cls)
         # Register this Signal to cleanup after testing
         signal.signal(signal.SIGALRM, cls._cleanup_cls)
+        cls.logger.info("Registering weakref.finalize")
 
     @property
     def name(self) -> str:
@@ -159,11 +168,15 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
                 # Yet another special case for VM series names with multipe '-' in their names
                 doc_name = self.document_file.path.stem.split("-")[0]
                 if doc_name not in document_title_string_list:
-                    document_title_content = [title for s in document_title.content.list if (title := self.stringify(s))]
-                    document_title_string_list = [re.sub(r"[_-]", "", s).lower() for s in document_title_content]
-                index = document_title_string_list.index(
-                    doc_name
-                )
+                    document_title_content = [
+                        title
+                        for s in document_title.content.list
+                        if (title := self.stringify(s))
+                    ]
+                    document_title_string_list = [
+                        re.sub(r"[_-]", "", s).lower() for s in document_title_content
+                    ]
+                index = document_title_string_list.index(doc_name)
             match = re.search(
                 r"^([a-zA-Z0-9_]+)-?(?:.+)?$", document_title_content[index]
             )
@@ -278,12 +291,14 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
             vals = []
             for value in list_of_values:
                 # Remove superscript and other special characters
-                precleaned_value = re.sub(r"</?sup>|®|©|™", " ", value)
+                precleaned_value = re.sub(r"</?sup>(?:[\d,]+)?|®|©|™", " ", value)
                 # Ensure strings do not have multiple whitespaces
-                value = re.sub(r"\s{2,}", " ", precleaned_value)
+                value = re.sub(r"\s{2,}", " ", precleaned_value).strip()
                 out = cls.split_strings(value)
                 vals.append(cls.filter_non_strings(out))
             body_values.append(vals)
+        # Filter out potentially empty lines, e.g. [[], [], []]
+        body_values = [b for b in body_values if any(b)]
         return header_values, body_values
 
     @classmethod

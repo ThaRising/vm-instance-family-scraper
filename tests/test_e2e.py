@@ -15,6 +15,7 @@ class TestEndToEnd(BaseTestCase):
         _, self.families = self.repository.get_families()
 
     def test010_end_to_end(self):
+        self.repository.generate_last_commit_index()
         for document in self.documents:
             family_document = document.get_associated_family(self.families)
             parser = document_to_parser(document, family_document)

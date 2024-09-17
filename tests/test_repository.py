@@ -60,3 +60,6 @@ class TestDocsSourceRepository(BaseTestCase):
             timestamp = self.repository.last_commit_for_document(document)
             print(timestamp)
             self.assertTrue(timestamp)
+
+    def test060_get_file_changed_index(self):
+        self.repository.generate_last_commit_index()

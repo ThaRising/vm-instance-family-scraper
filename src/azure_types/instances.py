@@ -61,9 +61,17 @@ class SkuTypes:
                 _addons = re.sub(r"\s|-|_", "", _addons)
                 for addon_id in list(_addons):
                     addons[addon_id] = constants.ADDONS_MAPPING[addon_id]
-            accelerator = instance_attrs["accel"]
-            if accelerator:
-                accelerator = re.sub(r"\s|-|_", "", accelerator)
+            _accelerator = instance_attrs["accel"]
+            if _accelerator:
+                _accelerator = re.sub(r"\s|-|_", "", _accelerator)
+            accelerator = (
+                {
+                    "name": _accelerator,
+                    "description": constants.SKU_ACCELERATOR_EXPLANATIONS[_accelerator],
+                }
+                if _accelerator
+                else None
+            )
             version = instance_attrs["version"] or "v1"
             version = version.replace("v", "")
             iversion = instance_attrs["iversion"]

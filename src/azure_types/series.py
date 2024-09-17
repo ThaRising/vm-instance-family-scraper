@@ -1,4 +1,3 @@
-import datetime
 import math
 import re
 import typing as t
@@ -11,7 +10,7 @@ from src.parsers.series import SeriesMarkdownDocumentParser
 
 class AzureSkuSeriesType:
     regex = re.compile(
-        r"^(?P<fam>[A-Z])(?P<subfam>[A-Z]{0,2})(?P<addons>[a-u,w-z]*)_?(?P<accel>[a-zA-Z\d]+_?)?(?P<version>v\d)?(?P<iversion>\d)?$"
+        r"^(?P<fam>[A-Z])(?P<subfam>[A-Z]{0,2})(?P<addons>[a-u,w-z]*)_?(?P<accel>[a-uw-zA-Z\d]+_?)?(?P<version>v\d)?(?P<iversion>\d)?$"
     )
     min_max_unit_regex = re.compile(
         r"^(?P<min>[\d.]+)+\s?-?\s?(?P<max>[\d.]+)?+\s?(?P<type>[\w\s]*?)$"
@@ -91,9 +90,14 @@ class AzureSkuSeriesType:
         self.addons = self._family_attributes.group("addons")
         self.addons_mapping: t.OrderedDict[t.List[str]] = OrderedDict()
         self._get_addons_mapping()
-        self.accelerator = self._family_attributes.group("accel")
-        if self.accelerator:
-            self.accelerator = self.accelerator.rstrip("_")
+        self.accelerator: t.Optional[t.Dict[str, t.Union[str, list]]] = None
+        accelerator = self._family_attributes.group("accel")
+        if accelerator:
+            accelerator = accelerator.rstrip("_")
+            self.accelerator = {
+                "name": accelerator,
+                "description": constants.SKU_ACCELERATOR_EXPLANATIONS[accelerator],
+            }
         self.version = self._family_attributes.group("version") or "v1"
         self.version = self._cast_to_int(self.version[-1])
         self.vcpus_min: t.Optional[int] = None
