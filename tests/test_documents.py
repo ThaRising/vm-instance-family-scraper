@@ -1,17 +1,13 @@
 import logging
-import unittest
-from pathlib import Path
 
-from src import constants
-from src.documents import DocumentDescriptor
-from src.repository import DocsSourceRepository
+from .shared import BaseTestCase, tag
 
 logger = logging.getLogger(__name__)
 
 
-class TestDocumentDescriptor(unittest.TestCase):
+@tag("document_descriptor")
+class TestDocumentDescriptor(BaseTestCase):
     test_files: list
-    repository: DocsSourceRepository
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -53,26 +49,7 @@ class TestDocumentDescriptor(unittest.TestCase):
                 },
             ),
         ]
-        cls.repository = DocsSourceRepository(
-            constants.MS_REPOSITORY_URL,
-            constants.MS_REPOSITORY_NAME,
-            constants.MS_REPOSITORY_PATH,
-        )
-
-    def setUp(self) -> None:
-        self.cls = DocumentDescriptor
-        current_path = Path(__file__).parent
-        clone_basepath = current_path / "data"
-        if not (clone_basepath / self.repository.repo_name).exists():
-            self.repository_workdir = self.repository.clone_repository(clone_basepath)
-        else:
-            logger.debug("Repo already exists, not cloning again")
-            self.repository_workdir = (
-                clone_basepath
-                / self.repository.repo_name
-                / self.repository.repo_relative_path
-            )
-            self.repository.repo_workdir_abs_path = self.repository_workdir
+        super().setUpClass()
 
     def test010_attribute_detection(self):
         for relative_filepath, attrs in self.test_files:
@@ -110,7 +87,3 @@ class TestDocumentDescriptor(unittest.TestCase):
             else:
                 documents = doc.to_document_files()
                 self.assertEqual(len(documents), 0)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.repository.cleanup()

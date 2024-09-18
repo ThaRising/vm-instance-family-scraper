@@ -6,9 +6,10 @@ from src.mixins import ParserUtilityMixin
 from src.parsers.families import FamilyMarkdownDocumentParser
 from src.parsers.utility import document_to_parser
 
-from .shared import BaseTestCase
+from .shared import BaseTestCase, tag
 
 
+@tag("discovery")
 class TestDocumentDiscovery(BaseTestCase):
     def test010_discover_families(self):
         _, discovered_families_list = self.repository.get_families()
