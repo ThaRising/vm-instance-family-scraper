@@ -191,7 +191,12 @@ class DocsSourceRepository(ParserUtilityMixin):
     ) -> datetime.datetime:
         assert self.repo
         if self.commit_index:
-            return self.commit_index[document_file.path]
+            commit_time = self.commit_index.get(document_file.path, None)
+            logger.debug(
+                f"File '{document_file.name}' not found in index, iterating commits"
+            )
+            if commit_time:
+                return commit_time
         for commit in self.repo.iter_commits(self.repo_branch):
             commit_files = [Path(c) for c in commit.stats.files.keys()]
             if document_file.path.relative_to(self.repo.working_dir) in commit_files:
@@ -224,4 +229,3 @@ class DocsSourceRepository(ParserUtilityMixin):
                 path = Path(self.repo.working_dir) / filepath
                 commit_index[path] = commit_time
         self.commit_index = commit_index
-

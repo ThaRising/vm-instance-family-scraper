@@ -1,9 +1,14 @@
 import hashlib
+import json
+import logging
 import re
 import typing as t
 from pathlib import Path
+from urllib.parse import quote_plus
 
 import panflute
+import pymongo
+from pymongo.collection import Collection
 
 
 class FileHashingMixin:
@@ -20,11 +25,15 @@ class FileHashingMixin:
                 sha256.update(data)
         return sha256
 
-    def generate_hash(self, str_or_bytes: t.Union[str, bytes]) -> "hashlib._Hash":
-        if not isinstance(str_or_bytes, bytes):
-            str_or_bytes = t.cast(str, str_or_bytes)  # type: ignore
-            str_or_bytes = str_or_bytes.encode()
-        sha256 = hashlib.sha256(str_or_bytes)
+    def generate_hash(
+        self, data: t.Union[str, bytes, t.MutableMapping]
+    ) -> "hashlib._Hash":
+        if isinstance(data, dict):
+            data = json.dumps(data)
+        if isinstance(data, str):
+            data = data.encode()
+        data = t.cast(bytes, data)
+        sha256 = hashlib.sha256(data)
         return sha256
 
     def file_is_different(self, new_file_path: Path) -> bool:
@@ -68,3 +77,40 @@ class ParserUtilityMixin:
     @staticmethod
     def flatten_list_of_lists(lst: t.List[t.List[t.Any]]) -> t.List[t.Any]:
         return [item for sublist in lst for item in sublist]
+
+
+class MongoDBMixin:
+    logger: t.ClassVar[logging.Logger]
+    mongodb_collection_name: t.ClassVar[str]
+
+    mongodb_database_name: t.ClassVar[str]
+    mongodb_hostname: t.ClassVar[str]
+    mongodb_username: t.ClassVar[str]
+    mongodb_password: t.ClassVar[str]
+
+    @property
+    def database_uri(self) -> str:
+        uri = "mongodb://%s:%s@%s" % (
+            quote_plus(self.mongodb_username),
+            quote_plus(self.mongodb_password),
+            self.mongodb_hostname,
+        )
+        return uri
+
+    @property
+    def client(self) -> pymongo.MongoClient:
+        self.logger.warning(
+            f"Connecting to MongoDB Database '{self.mongodb_database_name}'"
+        )
+        self.logger.debug(f"MongoDB URI is '{self.database_uri}'")
+        return pymongo.MongoClient(self.database_uri)
+
+    def drop(self) -> None:
+        self.logger.warning(f"Dropping MongoDB Database '{self.mongodb_database_name}'")
+        self.client.drop_database(self.mongodb_database_name)
+
+    @property
+    def collection(self) -> Collection[t.MutableMapping[str, t.Any]]:
+        database = self.client[self.mongodb_database_name]
+        collection = database[self.mongodb_collection_name]
+        return collection

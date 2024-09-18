@@ -5,6 +5,7 @@ import typing as t
 from pathlib import Path
 from urllib.parse import quote_plus
 
+import psutil
 from pymongo import MongoClient
 
 from src import constants
@@ -43,22 +44,23 @@ if __name__ == "__main__":
         repository.generate_last_commit_index()
         documents = repository.get_documents()
         _, families = repository.get_families()
-        sku_series_collection = get_mongo_collection("sku_series")
-        sku_types_collection = get_mongo_collection("sku_types")
-        for document in documents:
+        for i, document in enumerate(documents):
             family_document = document.get_associated_family(families)
             parser = document_to_parser(document, family_document)
             parser = t.cast(SeriesMarkdownDocumentParser, parser)
+            print(f"Start Files Nr. '{len(psutil.Process().open_files())}'")
             with parser as parser:
                 dto = parser.to_type
                 if dto:
                     dto.set_last_updated_azure(repository)
-                    __import__("pprint").pprint(dto.to_dto())
-                    sku_series_collection.insert_one(dto.to_dto())
+                    __import__("pprint").pprint(dto.serialize())
+                    dto.write_to_database()
                 sku_types = SkuTypes(parser)
-                __import__("pprint").pprint(sku_types.to_dto())
-                for sku_type in sku_types.to_dto().values():
-                    sku_types_collection.insert_one(dict(sku_type))
+                for sku_type in sku_types:
+                    sku_type.set_last_updated_azure(repository)
+                    __import__("pprint").pprint(sku_type.serialize())
+                    sku_type.write_to_database()
+            print(f"End Files Nr. '{len(psutil.Process().open_files())}'")
     except Exception as e:
         repository.cleanup()
         signal.alarm(1)

@@ -31,6 +31,11 @@ class SeriesMarkdownDocumentParser(BaseParser):
             self.family_document_file, self.family_document_file
         )
 
+    def __exit__(self, *args, **kwargs) -> None:
+        super().__exit__(*args, **kwargs)
+        self.logger.debug("Finalizing lifecycle of family parser")
+        self.family_document_parser.finalize()
+
     @cached_property
     def to_type(self):
         from src.azure_types.series import AzureSkuSeriesType
@@ -159,7 +164,8 @@ class SeriesMarkdownDocumentParser(BaseParser):
             parser = self._get_linked_doc_parser_from_family_page(
                 all_links, link_identifier="summary"
             )
-            return self._get_host_summary(parser)
+            with parser:
+                return self._get_host_summary(parser)
         return self._get_host_summary(self)
 
     def _paragraph_is_capabilities(self, content: str) -> bool:
@@ -228,7 +234,7 @@ class SeriesMarkdownDocumentParser(BaseParser):
         )
         return parser
 
-    def get_associated_instance_names(self):
+    def get_associated_instance_names(self) -> t.List[str]:
         self.logger.debug(
             f"get_associated_instance_names called for document '{self.path.name}' ({self.name})"
         )

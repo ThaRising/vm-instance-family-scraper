@@ -283,7 +283,7 @@ class AzureSkuCapabilities:
 
     @staticmethod
     def clean_string(content: str) -> str:
-        return re.sub(r"<sup>\d</sup>", "", content)
+        return re.sub(r"<sup>\d?</sup>", "", content)
 
     @classmethod
     def clean_key(cls, key: str) -> str:

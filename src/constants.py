@@ -1,5 +1,16 @@
+import os
 import re
 import typing as t
+
+from dotenv import load_dotenv
+
+load_dotenv()
+MONGODB_HOSTNAME = os.environ.get("MONGODB_HOSTNAME", None) or "localhost"
+MONGODB_DATABASE_NAME = (
+    os.environ.get("MONGODB_DATABASE_NAME", None) or "ms_instance_family_scraper"
+)
+MONGODB_USERNAME = os.environ.get("MONGODB_USERNAME", None) or "root"
+MONGODB_PASSWORD = os.environ.get("MONGODB_PASSWORD", None) or "root"
 
 MS_REPOSITORY_URL = "https://github.com/MicrosoftDocs/azure-compute-docs.git"
 MS_REPOSITORY_NAME = t.cast(
@@ -60,7 +71,7 @@ SKU_FIELDS_EXPLANATIONS = {
     "family_description": "Short description of this SKU family",
     "subfamilies": "A list of this SKU families subfamilies and associated descriptions",
     "vcpus": "Number of vCPUs (size) of this SKU",
-    "constrained_cpus": "Number of CPU cores this SKU has been constrained to for per-Core licensing cost savings",
+    "constrained_vcpus": "Number of CPU cores this SKU has been constrained to for per-Core licensing cost savings",
     "addons": "A list of additional SKU features and their descriptions",
     "accelerator": "Denotes the type of hardware accelerator in the specialized/GPU SKUs",
     "version": "Denotes the mainline version of this SKU",
@@ -74,6 +85,10 @@ SKU_ACCELERATOR_EXPLANATIONS = {
     "V620": [
         "AMD Radeon PRO V620 GPU enabled VMs",
         "AMD Radeon PRO V620 GPU enabled VMs with 32GiB of frame buffer",
+    ],
+    "V710": [
+        "AMD Radeon PRO V710 GPU enabled VMs",
+        "AMD Radeon PRO V710 GPU enabled VMs with between 4GiB and 32GiB of frame buffer",
     ],
     "MI300X": [
         "AMD Instinct MI300 GPUs enabled VMs",

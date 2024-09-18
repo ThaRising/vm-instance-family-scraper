@@ -102,7 +102,6 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
 
     def finalize(self, *args, **kwargs) -> None:
         cls = self.__class__
-        cls.logger.info("finalize called")
         self.cleanup()
         with contextlib.suppress(KeyError):
             cls.__interned.remove(self)
@@ -111,6 +110,7 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
         self.finalize()
 
     def cleanup(self) -> None:
+        self.file.close()
         self.path.unlink(missing_ok=True)
 
     @classmethod
@@ -190,7 +190,7 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
 
     @lru_cache(maxsize=1)
     def last_updated_timestamp(self, repo: DocsSourceRepository) -> datetime.datetime:
-        return repo.last_commit_for_document(self._path)
+        return repo.last_commit_for_document(self.document_file)
 
     def commit_to_tempfile(self) -> bool:
         self.logger.debug(
@@ -291,7 +291,7 @@ class BaseParser(FileHashingMixin, ParserUtilityMixin):
             vals = []
             for value in list_of_values:
                 # Remove superscript and other special characters
-                precleaned_value = re.sub(r"</?sup>(?:[\d,]+)?|®|©|™", " ", value)
+                precleaned_value = re.sub(r"</?sup>(?:[\d\s,]+)?|®|©|™", " ", value)
                 # Ensure strings do not have multiple whitespaces
                 value = re.sub(r"\s{2,}", " ", precleaned_value).strip()
                 out = cls.split_strings(value)

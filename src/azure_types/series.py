@@ -1,14 +1,17 @@
-import math
 import re
 import typing as t
 from collections import OrderedDict
 
 from src import constants
+from src.mixins import FileHashingMixin, MongoDBMixin
 from src.parsers.families import FamilyMarkdownDocumentParser
 from src.parsers.series import SeriesMarkdownDocumentParser
 
+from .shared import AzureType, DescriptionObject
 
-class AzureSkuSeriesType:
+
+class AzureSkuSeriesType(AzureType, FileHashingMixin, MongoDBMixin):
+    mongodb_collection_name: t.ClassVar[str] = "sku_series"
     regex = re.compile(
         r"^(?P<fam>[A-Z])(?P<subfam>[A-Z]{0,2})(?P<addons>[a-u,w-z]*)_?(?P<accel>[a-uw-zA-Z\d]+_?)?(?P<version>v\d)?(?P<iversion>\d)?$"
     )
@@ -26,10 +29,11 @@ class AzureSkuSeriesType:
         "name",
         "family_id",
         "family_description",
-        "subfamily_id",
-        "subfamily_description",
+        "_subfamilies",
+        "subfamilies",
+        "_addons",
         "addons",
-        "addons_mapping",
+        "_accelerator",
         "accelerator",
         "version",
         "vcpus_min",
@@ -76,29 +80,35 @@ class AzureSkuSeriesType:
     ) -> None:
         self.parser = series_parser
         self.family_parser = family_parser
+        self._id: t.Optional[str] = None
 
         self.name = series_parser.name
-        self._family_attributes = self.regex.search(self.name)
-        self.family_id = self._family_attributes.group("fam")
+        _series_attributes = self.regex.search(self.name)
+        assert _series_attributes
+        self._series_attributes = _series_attributes.groupdict()
+
+        self.family_id = self._series_attributes["fam"]
         self.family_description = constants.FAMILIES[self.family_id]
-        self.subfamily_id = self._family_attributes.group("subfam") or None
-        self.subfamily_description = None
-        if self.subfamily_id:
-            if self.subfamily_id == "C" and self.parser.is_confidential:
-                self.subfamily_description = constants.SUBFAMILIES["_C"]
-            self.subfamily_description = constants.SUBFAMILIES[self.subfamily_id]
-        self.addons = self._family_attributes.group("addons")
-        self.addons_mapping: t.OrderedDict[t.List[str]] = OrderedDict()
-        self._get_addons_mapping()
-        self.accelerator: t.Optional[t.Dict[str, t.Union[str, list]]] = None
-        accelerator = self._family_attributes.group("accel")
-        if accelerator:
-            accelerator = accelerator.rstrip("_")
+
+        self._subfamilies: t.Optional[str] = None
+        self.subfamilies: t.OrderedDict[str, t.Dict[str, str]] = OrderedDict()
+        self._get_subfamilies()
+
+        self._addons: t.Optional[str] = None
+        self.addons: t.OrderedDict[str, t.Dict[str, str]] = OrderedDict()
+        self._get_addons()
+
+        self._accelerator = self._series_attributes["accel"]
+        self.accelerator: t.Dict[str, t.Dict[str, str]] = {}
+        if self._accelerator:
+            accelerator = self._accelerator.rstrip("_")
             self.accelerator = {
-                "name": accelerator,
-                "description": constants.SKU_ACCELERATOR_EXPLANATIONS[accelerator],
+                accelerator: DescriptionObject(
+                    accelerator, constants.SKU_ACCELERATOR_EXPLANATIONS
+                ).serialize()
             }
-        self.version = self._family_attributes.group("version") or "v1"
+
+        self.version = self._series_attributes["version"] or "v1"
         self.version = self._cast_to_int(self.version[-1])
         self.vcpus_min: t.Optional[int] = None
         self.vcpus_max: t.Optional[int] = None
@@ -144,36 +154,38 @@ class AzureSkuSeriesType:
         self._get_capabilities()
         self.last_updated_azure: t.Optional[str] = None
 
-    def to_dto(self) -> t.Dict[str, t.Union[int, str, bool, None]]:
+    def serialize(self):
         return {k: getattr(self, k) for k in self.__attrs}
+
+    def write_to_database(self) -> bool:
+        return self._write_to_database({"name": self.name})
+
+    def _get_subfamilies(self) -> None:
+        _subfamilies = self._series_attributes["subfam"]
+        subfamilies = OrderedDict()
+        if _subfamilies:
+            for subfam_id in list(_subfamilies):
+                if subfam_id == "C" and self.parser.is_confidential:
+                    subfam_id = "_C"
+                subfamilies[subfam_id] = DescriptionObject(
+                    subfam_id, constants.SUBFAMILIES
+                ).serialize()
+        self._subfamilies = _subfamilies
+        self.subfamilies = subfamilies
 
     def set_last_updated_azure(self, repo) -> None:
         self.last_updated_azure = repo.last_commit_for_document(
             self.parser.document_file
         ).isoformat()
 
-    @classmethod
-    def _cast_to_int(cls, val: t.Union[int, str, None]) -> t.Optional[int]:
-        if val is None or isinstance(val, int):
-            return val
-        if cls._is_float(val):
-            return math.floor(float(val))
-        return int(val)
-
-    @staticmethod
-    def _is_float(val: str) -> bool:
-        try:
-            float(val)
-        except ValueError:
-            return False
-        else:
-            return True
-
-    def _get_addons_mapping(self) -> None:
-        if not self.addons:
+    def _get_addons(self) -> None:
+        self._addons = self._series_attributes["addons"]
+        if not self._addons:
             return
-        for addon in list(self.addons):
-            self.addons_mapping[addon] = constants.ADDONS_MAPPING[addon]
+        for addon in list(self._addons):
+            self.addons[addon] = DescriptionObject(
+                addon, constants.ADDONS_MAPPING
+            ).serialize()
 
     def _get_vcpu_stats(self) -> None:
         cpus = self.parser.host_specs_table["Processor"]
@@ -207,6 +219,7 @@ class AzureSkuSeriesType:
         storage_types = self.local_disk_type_mapping
         for i, storage in enumerate(local_storage_quantity):
             storage_attrs = self.min_max_unit_regex.search(storage)
+            assert storage_attrs
             _storage_types = [storage_attrs.group("type").lower().startswith(s) for s in storage_types.keys()]  # type: ignore
             _key = list(storage_types.keys())[_storage_types.index(True)]
             key = self.local_disk_type_mapping[_key]
